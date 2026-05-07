@@ -117,7 +117,7 @@ def load_cached_voice(voice_path: str):
     return data
 
 
-def load_model(model_path: str, dev: str, num_steps: int = 10):
+def load_model(model_path: str, dev: str, num_steps: int = 12):
     """Load VibeVoice model and processor (auto-detects 0.5B vs 1.5B)."""
     global model, processor, device, is_streaming_model
     device = dev
@@ -302,12 +302,21 @@ def create_app(model_path: str, dev: str, num_steps: int) -> FastAPI:
                         return_tensors="pt",
                         return_attention_mask=True,
                     )
+                    # Sampled decoding (do_sample=True) restores the prosody
+                    # variation the 1.5B model loses with greedy decoding —
+                    # otherwise it sounds like flat line-reading. cfg_scale
+                    # bumped from 1.3 → 1.5 for tighter voice-prompt
+                    # adherence (more accent character).
                     outputs = model.generate(
                         **inputs,
                         max_new_tokens=max_new_tokens,
-                        cfg_scale=1.3,
+                        cfg_scale=1.5,
                         tokenizer=processor.tokenizer,
-                        generation_config={"do_sample": False},
+                        generation_config={
+                            "do_sample": True,
+                            "temperature": 0.95,
+                            "top_p": 0.95,
+                        },
                         verbose=False,
                         show_progress_bar=False,
                     )
@@ -383,7 +392,7 @@ if __name__ == "__main__":
     parser.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cpu")
     parser.add_argument("--port", type=int, default=8001, help="Server port")
     parser.add_argument("--host", default="0.0.0.0", help="Server host")
-    parser.add_argument("--num-steps", type=int, default=2, help="DDPM inference steps (2=fastest, 5=balanced, 10=quality)")
+    parser.add_argument("--num-steps", type=int, default=12, help="DDPM inference steps (2=fastest, 5=balanced, 10-12=quality)")
     args = parser.parse_args()
 
     app = create_app(args.model_path, args.device, args.num_steps)
